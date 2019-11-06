@@ -3,7 +3,8 @@ from bs4 import BeautifulSoup
 import datetime
 import re
 
-keywords = ["铁矿石", "动力煤", "铜", "黄金", "玉米", "豆粕", "橡胶", "原油", "风电"]
+# keywords = ["铁矿石", "动力煤", "铜", "黄金", "玉米", "豆粕", "橡胶", "原油", "风电"]
+keywords = ["黄金"]
 today = datetime.date.today()
 startDate = datetime.datetime(year=today.year, month=today.month, day=today.day, hour=00, minute=00, second=00)
 endDate = datetime.datetime(year=today.year, month=today.month, day=today.day, hour=23, minute=55, second=00)
@@ -27,10 +28,11 @@ url = "https://www.kanzhiqiu.com/user/login.htm"
 session = requests.session()
 session.post(url, headers=headers, data=form_data)
 
-# 初筛
-def judge(article, key="铁矿石"):
+# 初筛函数
+def judge(article, keyword="铁矿石"):
     # pattern = re.compile("([\u4e00-\u9fa5]*(铁矿石)[\u4e00-\u9fa5]*)|[a-zA-z0-9=\.-_]*(铁矿石)")
-    pattern = re.compile("[\u4e00-\u9fa5]*(铁矿石)[\u4e00-\u9fa5]*")
+    pattern_str = r"[\u4e00-\u9fa5]*({})[\u4e00-\u9fa5]*".format(keyword)
+    pattern = re.compile(pattern_str)
     index = []
     for i, a in enumerate(article):
         flag = 0
@@ -44,19 +46,17 @@ def judge(article, key="铁矿石"):
         del article[i]
     return article
 
-# 登录后获取页面内容
-def get_total_article(session, page, keyword="铁矿石"):
-    article_list = []
-    domain = "https://www.kanzhiqiu.com/"
+# 模拟翻页请求，获取页面信息
+def page_request(session, page=1, keyword="铁矿石"):
     params = {
         "search": keyword,
         # 默认是DATE_LIMIT_YEAR, 现在要改成DATE_LIMIT_DAYS
-        "dateLimit": "",
+        "dateLimit": "DATE_LIMIT_YEARS",
         "startDate": startDate,
         "endDate": endDate,
         # NEWS为公众号, CJAUTONEWS为新闻官媒, CJCAST, EVENT为快讯, REPORT, CONF为研究报告
         # 这里可能会有问题
-        "type": "NEWS,BULLETIN,THIRDMARKETGG,HKMARKETGG,REPORT,RATINGREPORT,BONDGG,BONDGG_2,CONF,INVESTOR,CJCAST,CUSTOMERDOC,CJAUTONEWS",
+        "type": "NEWS,BULLETIN,THIRDMARKETGG,HKMARKETGG,REPORT,RATINGREPORT,BONDGG,BONDGG_2,REPORTCHART,EVENT,INTERACTION,CONF,INVESTOR,CJCAST,CUSTOMERDOC,CJAUTONEWS",
         "page": page,
         "pageSize": "10",
         "highlightLevel": "1",
@@ -71,63 +71,74 @@ def get_total_article(session, page, keyword="铁矿石"):
     response = session.post('https://www.kanzhiqiu.com/newsadapter/fulltextsearch/fulltext_search.htm', data=params)
     html = response.content.decode()
     # print(html)
+    return html
 
+def get_article(html, keyword="铁矿石"):
     soup = BeautifulSoup(html, "lxml")
     tag = soup.div
     article = tag.find_all("div", "globalSearch_list")
+    article_list = []
+    domain = "https://www.kanzhiqiu.com/"
 
     for arti in article:
         temp = {}
+        t = ""
         # 处理header标题是否有关键字
         # get_text()能够获取节点及子节点的全部文本节点
-        # 处理字符串中大量的空格
-        # 1、
-        # 2、
-        # 3、
-        # 4、
-        temp["content"] = str(arti.h3.get_text()).replace("\n", "")
-        temp["link"] = domain + str(arti.h3.a["href"])
+        # 处理字符串中大量的空格,做两次处理
+        # 处理字符串中的回车？
+        temp["title"] = arti.h3.get_text().replace("\n", "")
+        temp["title"] = arti.h3.get_text().replace(" ", "")
+        # 快讯没有连接可以获取
+        if arti.h3.a == None:
+            temp["link"] = " "
+        else:
+            temp["link"] = domain + str(arti.h3.a["href"])
         desc = arti.find_all("div", "globalSearch_list_con")
         for d in desc:
             text = d.get_text()
-            temp["text"] = text.replace(" ", "")
+            temp["desctext"] = arti.h3.get_text().replace("\n", "")
+            temp["desctext"] = text.replace(" ", "")
+        temp["date"] = arti.find("div", "globalSearch_list_subtit_r fr").get_text()
         article_list.append(temp)
         # 模式匹配关键字，筛选后加入列表
-    article_list = judge(article_list)
-    print(article_list)
+    article_list = judge(article_list, keyword=keyword)
+    return article_list
 
+# 登录后需要先请求一次网页获取分页数，分页数为1，不再做翻页请求
+all = []
 for keyword in keywords:
-    params = {
-        "search": keyword,
-        # 默认是DATE_LIMIT_YEAR, 现在要改成DATE_LIMIT_DAYS
-        "dateLimit": "",
-        "startDate": startDate,
-        "endDate": endDate,
-        # NEWS为公众号, CJAUTONEWS为新闻官媒, CJCAST, EVENT为快讯, REPORT, CONF为研究报告
-        # 这里可能会有问题
-        "type": "NEWS,BULLETIN,THIRDMARKETGG,HKMARKETGG,REPORT,RATINGREPORT,BONDGG,BONDGG_2,CONF,INVESTOR,CJCAST,CUSTOMERDOC,CJAUTONEWS",
-        "page": "1",
-        "pageSize": "10",
-        "highlightLevel": "1",
-        "boostReduction": "true",
-        "hyperSearchFields": "all",
-        "timeOut": "200",
-        "sortByTime": "true",
-        "clickFrom": "0",
-        "errorCollect": "true"
-    }
-
-    response = session.post('https://www.kanzhiqiu.com/newsadapter/fulltextsearch/fulltext_search.htm', data=params)
-    html = response.content.decode()
-    # print(html)
-
-    soup = BeautifulSoup(html, "lxml")
+    first_page_html = page_request(session, keyword=keyword)
+    soup = BeautifulSoup(first_page_html, "lxml")
     tag = soup.div
+    temp = {}
+    temp["key"] = keyword
+    temp["article"] = []
+
     # 模拟翻页
     page_list = tag.find(id="pageSet").find_all("a")
-    total = int(page_list[-3].get_text())
-    for p in range(2, total):
-        get_total_article(session, p, keyword)
+    total_page = int(page_list[-3].get_text())
+    # print(total_page)
+
+    if total_page == 1:
+         # 不能用append，
+        temp["article"] += get_article(first_page_html, keyword)
+        # get_article(first_page_html)
+    else:
+        temp["article"] += get_article(first_page_html, keyword)
+        for p in range(2, total_page+1):
+            next_page_html = page_request(session, page=p, keyword=keyword)
+            temp["article"] += get_article(next_page_html, keyword)
+        # get_article(first_page_html)
+        # for p in range(2, total_page+1):
+        #     next_page_html = page_request(session, p, keyword)
+        #     # all["article"].append(get_article(next_page_html))
+        #     get_article(next_page_html)
+    all.append(temp)
+
+# 对链接内容进行提取
+# for item in all:
+#     print(item)
 
 
 
